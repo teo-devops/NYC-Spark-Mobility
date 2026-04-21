@@ -23,3 +23,7 @@ requests==2.31.0
 
 # Core de Jupyter (Evita errores de ejecución en PyCharm)
 ipykernel
+pyspark>=3.5.0
+pytest
+google-generativeai
+
