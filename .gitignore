@@ -1,4 +1,30 @@
-.venv/
-*.zip
-*.so
+# Datos (demasiado grandes para git)
+data/bronze/
+data/silver/
+data/gold/
+data/streaming_source/
+
+# Secretos
+.env
+secrets/
+
+# MLflow artefactos
+mlflow_artifacts/
+
+# Spark events
+spark-events/
+
+# Python
 __pycache__/
+*.pyc
+*.pyo
+.venv/
+.pytest_cache/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# IDEs
+.idea/
+.vscode/
+*.DS_Store
