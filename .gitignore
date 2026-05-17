@@ -9,7 +9,7 @@ data/streaming_source/
 secrets/
 
 # MLflow artefactos
-mlflow_artifacts/
+mlflow_data/
 
 # Spark events
 spark-events/

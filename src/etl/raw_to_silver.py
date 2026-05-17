@@ -19,7 +19,7 @@ sys.path.insert(0, "/opt/spark/src")
 import mlflow
 from pyspark.sql import functions as F
 
-from common.schemas import YELLOW_SCHEMA, GREEN_SCHEMA, ZONE_SCHEMA
+from common.schemas import ZONE_SCHEMA
 from common.utils import get_spark, apply_nyc_filters, log_etl_metrics
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
@@ -31,10 +31,7 @@ EXPERIMENT   = "nyc_taxi_etl"
 
 # ── Datasets a procesar ────────────────────────────────────────────────────────
 DATASETS = [
-    ("yellow", "2025-03"),
-    ("yellow", "2025-11"),
-    ("green",  "2025-03"),
-    ("green",  "2025-11"),
+    ("yellow", "2024-01"),
 ]
 
 
@@ -90,10 +87,10 @@ def add_duration(df):
 
 
 def process_dataset(spark, fleet: str, month: str, zones_df):
-    schema = YELLOW_SCHEMA if fleet == "yellow" else GREEN_SCHEMA
-    path   = f"{BRONZE_PATH}/{fleet}_tripdata_{month}.parquet"
-
-    raw = spark.read.schema(schema).parquet(path)
+    path = f"{BRONZE_PATH}/{fleet}_tripdata_{month}.parquet"
+    # Parquet is self-describing — read without explicit schema to avoid type
+    # mismatches across different NYC TLC file vintages (int32 vs int64, etc.)
+    raw = spark.read.parquet(path)
     raw_count = raw.count()
 
     # Normalizar → columnas comunes

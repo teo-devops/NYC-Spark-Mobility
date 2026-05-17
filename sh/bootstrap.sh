@@ -32,7 +32,7 @@ if [ ! -f ".env" ]; then
 fi
 
 # ── 2. Crear carpetas del Data Lake si no existen ──────────────────────────────
-for dir in data/bronze data/silver data/gold data/streaming_source spark-events mlflow_artifacts/artifacts secrets; do
+for dir in data/bronze data/silver data/gold data/streaming_source spark-events mlflow_data/artifacts secrets; do
   mkdir -p "$dir"
 done
 echo "✅ Estructura de carpetas verificada"
@@ -42,8 +42,8 @@ echo "🚀 Levantando cluster Docker Compose..."
 docker compose up -d --build
 
 # Esperar a que Spark Master esté listo
-echo "⏳ Esperando a Spark Master..."
-until docker exec spark-master bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8080' 2>/dev/null; do
+echo "⏳ Esperando a Spark Master (puede tardar ~30s)..."
+until docker exec spark-master curl -sf http://localhost:8080 > /dev/null 2>&1; do
   sleep 3
 done
 echo "✅ Spark Master listo"
@@ -59,13 +59,13 @@ echo "✅ MLflow listo"
 if [ "$RUN_ETL" = true ]; then
   echo ""
   echo "🔄 Ejecutando ETL Bronze → Silver..."
-  docker exec spark-master spark-submit \
+  docker exec spark-master /opt/spark/bin/spark-submit \
     --master spark://spark-master:7077 \
     --conf spark.mlflow.trackingUri=http://mlflow:5000 \
     /opt/spark/src/etl/raw_to_silver.py
 
   echo "🔄 Ejecutando ETL Silver → Gold..."
-  docker exec spark-master spark-submit \
+  docker exec spark-master /opt/spark/bin/spark-submit \
     --master spark://spark-master:7077 \
     --conf spark.mlflow.trackingUri=http://mlflow:5000 \
     /opt/spark/src/etl/silver_to_gold.py
@@ -77,7 +77,7 @@ fi
 if [ "$RUN_TRAIN" = true ]; then
   echo ""
   echo "🏋️  Entrenando modelos..."
-  docker exec spark-master spark-submit \
+  docker exec spark-master /opt/spark/bin/spark-submit \
     --master spark://spark-master:7077 \
     --conf spark.mlflow.trackingUri=http://mlflow:5000 \
     /opt/spark/src/models/train.py
@@ -88,7 +88,7 @@ fi
 if [ "$RUN_STREAM" = true ]; then
   echo ""
   echo "📡 Arrancando Structured Streaming en background..."
-  docker exec -d spark-master spark-submit \
+  docker exec -d spark-master /opt/spark/bin/spark-submit \
     --master spark://spark-master:7077 \
     /opt/spark/src/etl/streaming_job.py
   echo "✅ Streaming job arrancado (background)"

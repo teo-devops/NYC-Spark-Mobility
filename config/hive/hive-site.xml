@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  config/hive/hive-site.xml
+  Conecta el Hive Metastore con MariaDB.
+  El conector JDBC se descarga por jar-downloader al primer arranque.
+-->
+<configuration>
+
+  <!-- ── JDBC backend ────────────────────────────────────────────────────── -->
+  <property>
+    <name>javax.jdo.option.ConnectionURL</name>
+    <value>jdbc:mysql://hive-metastore-db:3306/hive_metastore?createDatabaseIfNotExist=true&amp;useSSL=false&amp;allowPublicKeyRetrieval=true</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionDriverName</name>
+    <value>com.mysql.cj.jdbc.Driver</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionUserName</name>
+    <value>hive</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionPassword</name>
+    <value>hivepass</value>
+  </property>
+
+  <!-- ── Schema init automático ──────────────────────────────────────────── -->
+  <property>
+    <name>datanucleus.schema.autoCreateAll</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>false</value>
+  </property>
+
+  <!-- ── Warehouse dir ───────────────────────────────────────────────────── -->
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>/opt/spark/warehouse</value>
+  </property>
+
+  <!-- ── Metastore Thrift URI (para que Spark lo encuentre) ─────────────── -->
+  <property>
+    <name>hive.metastore.uris</name>
+    <value>thrift://hive-metastore:9083</value>
+  </property>
+
+</configuration>

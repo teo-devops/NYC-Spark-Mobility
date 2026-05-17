@@ -46,9 +46,10 @@ def get_spark(
         .enableHiveSupport()
         .config("spark.sql.warehouse.dir", "/opt/spark/warehouse")
         .config("spark.eventLog.enabled", "true")
-        .config("spark.eventLog.dir", "/opt/bitnami/spark/spark-events")
+        .config("spark.eventLog.dir", "/opt/spark/spark-events")
         .config("spark.mlflow.trackingUri", mlflow_uri)
-        # Parquet optimizaciones
+        # Parquet — disable vectorized reader so INT32/INT64 mismatches are coerced silently
+        .config("spark.sql.parquet.enableVectorizedReader", "false")
         .config("spark.sql.parquet.compression.codec", "snappy")
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
@@ -116,14 +117,15 @@ def apply_nyc_filters(df: DataFrame, fleet: str) -> DataFrame:
 def log_etl_metrics(run, raw_count: int, clean_count: int, fleet: str, month: str) -> None:
     """
     Registra métricas de calidad del ETL en el run MLflow activo.
-    run: mlflow.ActiveRun
+    En MLflow 2.x las métricas se loguean con mlflow.log_metric(), no en el objeto run.
     """
+    import mlflow as _mlflow
     removed = raw_count - clean_count
     pct_removed = removed / raw_count * 100 if raw_count > 0 else 0.0
 
-    run.log_metric(f"{fleet}_{month}_raw_count",   raw_count)
-    run.log_metric(f"{fleet}_{month}_clean_count", clean_count)
-    run.log_metric(f"{fleet}_{month}_removed_pct", round(pct_removed, 2))
+    _mlflow.log_metric(f"{fleet}_{month}_raw_count",   raw_count)
+    _mlflow.log_metric(f"{fleet}_{month}_clean_count", clean_count)
+    _mlflow.log_metric(f"{fleet}_{month}_removed_pct", round(pct_removed, 2))
 
     logger.info(
         "[%s %s] raw=%d  clean=%d  eliminados=%.1f%%",

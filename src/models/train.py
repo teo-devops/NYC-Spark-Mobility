@@ -37,10 +37,10 @@ SEED           = 42
 # Hiperparámetros — espejo de los usados en XGBoost del notebook
 # GBTRegressor es el equivalente nativo de Spark
 GBT_PARAMS = {
-    "maxIter":    300,   # n_estimators
-    "maxDepth":   6,
+    "maxIter":    50,    # 300 causes StackOverflowError during task serialization
+    "maxDepth":   5,
     "subsamplingRate": 0.8,
-    "stepSize":   0.1,   # learning_rate
+    "stepSize":   0.1,
 }
 
 FEATURE_COLS = [
@@ -103,10 +103,13 @@ def train_model(spark, df, label_col: str, model_name: str):
         print(f"   RMSE={metrics['rmse']:.4f}  MAE={metrics['mae']:.4f}  R²={metrics['r2']:.4f}")
 
         # Registrar en MLflow Model Registry
+        # dfs_tmpdir must be on the shared volume so worker-written parquet
+        # files are accessible from the driver when MLflow copies artifacts.
         mlflow.spark.log_model(
             model,
             artifact_path=model_name,
             registered_model_name=model_name,
+            dfs_tmpdir="/mlflow/tmp_spark_models",
         )
 
         print(f"   ✅ Modelo '{model_name}' registrado en MLflow")
@@ -114,7 +117,11 @@ def train_model(spark, df, label_col: str, model_name: str):
 
 
 def main():
-    spark = get_spark("Train_Medallion_Models")
+    spark = get_spark("Train_Medallion_Models", extra_config={
+        # GBT serialization produces deeply nested objects — increase JVM stack
+        "spark.driver.extraJavaOptions":   "-Xss8m",
+        "spark.executor.extraJavaOptions": "-Xss8m",
+    })
     mlflow.set_tracking_uri(MLFLOW_URI)
     mlflow.set_experiment(EXPERIMENT)
 

@@ -1,12 +1,9 @@
-version: '3.8'
-
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 #  NYC Taxi Distributed Lab — docker-compose.yml
-#  Basado en spark_ML, extendido con:
-#    · servicio streamlit
-#    · volumen data/ con subcarpetas medallion
-#    · secrets sin GCP si no se necesita
-# ─────────────────────────────────────────────
+#  MIGRADO: bitnami/spark → apache/spark:3.5.1
+#  Motivo: Bitnami archivó sus tags versionados en Docker Hub (sep 2025).
+#          apache/spark es la imagen oficial de la ASF, tags estables.
+# ─────────────────────────────────────────────────────────────────────────────
 
 networks:
   spark-net:
@@ -14,120 +11,137 @@ networks:
 
 volumes:
   mariadb-data:
-  hive-warehouse:
   spark-warehouse:
   external-jars:
 
-# ── Configuración común a todos los nodos Spark ──────────────────────────────
-x-spark-common: &spark-common
-  image: bitnami/spark:${SPARK_VERSION}
+# ── Base común para todos los nodos Spark ─────────────────────────────────────
+# DIFERENCIAS apache/spark vs bitnami/spark:
+#   · SPARK_MODE no existe → se usa `command` con spark-class
+#   · SPARK_MASTER_URL     → se pasa como argumento al worker
+#   · /opt/bitnami/spark   → /opt/spark
+x-spark-base: &spark-base
+  build:
+    context: .
+    dockerfile: docker/spark/Dockerfile
+    network: host
+  image: nyc-spark-mobility-spark
+  user: root
   environment: &spark-env
-    SPARK_RPC_AUTHENTICATION_ENABLED: "no"
-    SPARK_RPC_ENCRYPTION_ENABLED: "no"
-    SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
-    SPARK_SSL_ENABLED: "no"
-    SPARK_USER: "spark"
-  volumes:
-    - ./config/spark/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf:ro
-    - ./config/hive/hive-site.xml:/opt/bitnami/spark/conf/hive-site.xml:ro
-    - ./data:/opt/spark/data                   # Bronze / Silver / Gold / streaming_source
+    SPARK_NO_DAEMONIZE: "true"
+    JAVA_HOME: "/opt/java/openjdk"
+    GIT_PYTHON_REFRESH: "quiet"
+  volumes: &spark-volumes
+    - ./config/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+    - ./config/hive/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
+    - ./data:/opt/spark/data
     - ./src:/opt/spark/src
     - ./notebooks:/opt/spark/notebooks
     - spark-warehouse:/opt/spark/warehouse
-    - external-jars:/opt/external-jars:ro
-    - ./spark-events:/opt/bitnami/spark/spark-events
-    - ./mlflow_artifacts:/mlflow
+    - external-jars:/opt/external-jars
+    - ./spark-events:/opt/spark/spark-events
+    - ./mlflow_data:/mlflow
   networks:
     - spark-net
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 services:
 
-  # ── Descarga JARs externos al arrancar ─────
+  # ── Descarga JARs al iniciar ─────────────────────────────────────────────────
   jar-downloader:
     image: alpine:latest
     container_name: jar-downloader
-    command: >
-      sh -c "apk add --no-cache curl &&
-        curl -fL https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/8.2.0/mysql-connector-j-8.2.0.jar
-             -o /jars/mysql-connector-j.jar &&
-        echo 'JARs descargados OK'"
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache curl &&
+        [ -f /jars/mysql-connector-j.jar ] ||
+        curl -fL https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/8.2.0/mysql-connector-j-8.2.0.jar -o /jars/mysql-connector-j.jar &&
+        echo 'JAR listo.'
     volumes:
       - external-jars:/jars
+    networks:
+      - spark-net
 
-  # ── Spark Master ────────────────────────────
+  # ── Spark Master ─────────────────────────────────────────────────────────────
   spark-master:
-    <<: *spark-common
+    <<: *spark-base
     container_name: spark-master
     hostname: spark-master
-    environment:
-      <<: *spark-env
-      SPARK_MODE: "master"
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
     ports:
       - "8080:8080"
       - "7077:7077"
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8080'"]
-      interval: 10s
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 > /dev/null"]
+      interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 8
+      start_period: 20s
 
-  # ── Spark Workers ───────────────────────────
+  # ── Spark Worker 1 ───────────────────────────────────────────────────────────
   spark-worker-1:
-    <<: *spark-common
+    <<: *spark-base
     container_name: spark-worker-1
+    hostname: spark-worker-1
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker",
+              "spark://spark-master:7077"]
     environment:
       <<: *spark-env
-      SPARK_MODE: "worker"
-      SPARK_MASTER_URL: "spark://spark-master:7077"
-      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
-      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-2g}
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
     depends_on:
       spark-master:
         condition: service_healthy
 
+  # ── Spark Worker 2 ───────────────────────────────────────────────────────────
   spark-worker-2:
-    <<: *spark-common
+    <<: *spark-base
     container_name: spark-worker-2
+    hostname: spark-worker-2
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker",
+              "spark://spark-master:7077"]
     environment:
       <<: *spark-env
-      SPARK_MODE: "worker"
-      SPARK_MASTER_URL: "spark://spark-master:7077"
-      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
-      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-2g}
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
     depends_on:
       spark-master:
         condition: service_healthy
 
-  # ── History Server ──────────────────────────
+  # ── Spark History Server ─────────────────────────────────────────────────────
   spark-history-server:
-    <<: *spark-common
+    <<: *spark-base
     container_name: spark-history-server
     hostname: spark-history-server
-    user: root
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.history.HistoryServer"]
     environment:
-      - SPARK_HISTORY_OPTS=-Dspark.history.fs.logDirectory=/opt/bitnami/spark/spark-events
-    volumes:
-      - ./spark-events:/opt/bitnami/spark/spark-events
+      <<: *spark-env
+      SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=/opt/spark/spark-events"
     ports:
       - "18080:18080"
-    command: /opt/bitnami/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer
+    volumes:
+      - ./spark-events:/opt/spark/spark-events
+    networks:
+      - spark-net
 
-  # ── Jupyter Lab ─────────────────────────────
+  # ── Jupyter Lab ──────────────────────────────────────────────────────────────
   jupyter:
     build:
       context: .
       dockerfile: docker/jupyter/Dockerfile
+      network: host
     container_name: jupyter
+    hostname: jupyter
     ports:
       - "8888:8888"
     environment:
-      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
-      - JUPYTER_TOKEN=${JUPYTER_TOKEN}
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      - SPARK_MASTER=spark://spark-master:7077
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-spark123}
     volumes:
       - .:/home/jovyan/work
-      - ./config/spark/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf:ro
-      - ./mlflow_artifacts:/mlflow
+      - ./mlflow_data:/mlflow
     networks:
       - spark-net
     depends_on:
@@ -136,57 +150,66 @@ services:
       mlflow:
         condition: service_started
 
-  # ── MLflow Server ────────────────────────────
+  # ── MLflow Server ─────────────────────────────────────────────────────────────
   mlflow:
-    image: ghcr.io/mlflow/mlflow:${MLFLOW_VERSION}
+    image: ghcr.io/mlflow/mlflow:${MLFLOW_VERSION:-v2.11.3}
     container_name: mlflow
+    hostname: mlflow
     ports:
       - "5000:5000"
     environment:
-      - MLFLOW_BACKEND_STORE_URI=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@hive-metastore-db/${MYSQL_DATABASE}_mlflow
       - MLFLOW_ARTIFACT_ROOT=/mlflow/artifacts
     volumes:
-      - ./mlflow_artifacts:/mlflow
-    command: >
-      mlflow server
-        --backend-store-uri mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@hive-metastore-db/${MYSQL_DATABASE}_mlflow
-        --default-artifact-root /mlflow/artifacts
-        --host 0.0.0.0
+      - ./mlflow_data:/mlflow
+    command:
+      - bash
+      - -c
+      - |
+        pip install pymysql --quiet &&
+        mlflow server \
+          --backend-store-uri mysql+pymysql://${MYSQL_USER:-hive}:${MYSQL_PASSWORD:-hivepass}@hive-metastore-db/${MYSQL_DATABASE:-hive_metastore}_mlflow \
+          --default-artifact-root /mlflow/artifacts \
+          --host 0.0.0.0 \
+          --port 5000
     networks:
       - spark-net
     depends_on:
       hive-metastore-db:
         condition: service_healthy
 
-  # ── Hive Metastore DB (MariaDB) ──────────────
+  # ── MariaDB — backend de Hive Metastore y MLflow ─────────────────────────────
   hive-metastore-db:
-    image: mariadb:${MARIADB_VERSION}
+    image: mariadb:${MARIADB_VERSION:-10.11}
     container_name: hive-metastore-db
+    hostname: hive-metastore-db
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-hive_metastore}
+      MYSQL_USER: ${MYSQL_USER:-hive}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-hivepass}
     volumes:
       - mariadb-data:/var/lib/mysql
+      - ./config/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
     networks:
       - spark-net
 
-  # ── Hive Metastore ───────────────────────────
+  # ── Hive Metastore ────────────────────────────────────────────────────────────
   hive-metastore:
-    image: apache/hive:${HIVE_VERSION}
+    image: apache/hive:${HIVE_VERSION:-4.0.0}
     container_name: hive-metastore
+    hostname: hive-metastore
     environment:
-      HIVE_AUX_JARS_PATH: "/opt/external-jars"
-      DB_DRIVER: "mysql"
-      SERVICE_NAME: "metastore"
-      HADOOP_CLASSPATH: "/opt/external-jars/*"
-    command: /opt/hive/bin/hive --service metastore
+      DB_DRIVER: mysql
+      SERVICE_NAME: metastore
+      HIVE_AUX_JARS_PATH: /opt/external-jars
+      HADOOP_CLASSPATH: /opt/external-jars/*
+    command: ["/opt/hive/bin/hive", "--service", "metastore"]
     volumes:
       - ./config/hive/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
       - external-jars:/opt/external-jars:ro
@@ -195,24 +218,34 @@ services:
     depends_on:
       hive-metastore-db:
         condition: service_healthy
+      jar-downloader:
+        condition: service_completed_successfully
 
-  # ── Streamlit App (nuevo — de taxi-app-ai) ───
+  # ── Streamlit App ─────────────────────────────────────────────────────────────
+  # Arrancar solo tras entrenar: docker compose --profile app up streamlit
   streamlit:
     build:
       context: ./app
       dockerfile: Dockerfile
+      network: host
     container_name: streamlit-taxi
+    hostname: streamlit
     ports:
       - "8501:8501"
     environment:
-      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
-      - MODEL_NAME_FARE=xgb_fare
-      - MODEL_NAME_DURATION=xgb_duration
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      - MODEL_NAME_FARE=${MODEL_NAME_FARE:-xgb_fare}
+      - MODEL_NAME_DURATION=${MODEL_NAME_DURATION:-xgb_duration}
+      - DIST_MEDIA_PATH=/app/data/gold/dist_media
+      - ZONES_PATH=/app/data/bronze/taxi_zone_lookup.csv
     volumes:
-      - ./data/gold:/app/data/gold:ro      # distancias medias pre-calculadas
-      - ./mlflow_artifacts:/mlflow:ro
+      - ./data/gold:/app/data/gold:ro
+      - ./data/bronze/taxi_zone_lookup.csv:/app/data/bronze/taxi_zone_lookup.csv:ro
+      - ./mlflow_data:/mlflow
     networks:
       - spark-net
     depends_on:
       mlflow:
         condition: service_started
+    profiles:
+      - app
