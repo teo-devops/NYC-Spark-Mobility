@@ -136,50 +136,7 @@ Produce tres tablas Gold:
     --conf "spark.executor.extraJavaOptions=-Xss8m" \
     /opt/spark/src/models/train.py
 ```
-
-Entrena dos pipelines `VectorAssembler → StandardScaler → GBTRegressor`:
-- `xgb_fare` — predicción de tarifa
-- `xgb_duration` — predicción de duración
-
-Registra ambos modelos en MLflow Model Registry.
-
-### Paso 4 — Promover modelos a Production
-
-Desde MLflow UI (http://localhost:5000) o con el notebook `02_etl_to_streamlit_pipeline.ipynb`:
-
-```python
-import mlflow
-client = mlflow.tracking.MlflowClient()
-for model in ["xgb_fare", "xgb_duration"]:
-    v = client.get_latest_versions(model)[0]
-    client.transition_model_version_stage(model, v.version, "Production", archive_existing_versions=True)
-```
-
-### Paso 5 — Arrancar Streamlit
-
-```bash
-docker compose --profile app up -d streamlit
-```
-
-Abre http://localhost:8501. La app carga los modelos desde MLflow Registry (stage `Production`) y la tabla `dist_media` desde Gold para autocompletar la distancia según el par origen/destino.
-
----
-
-## Structured Streaming (opcional)
-
-```bash
-# Arrancar el job en background
-docker exec -d spark-master /opt/spark/bin/spark-submit \
-  --master spark://spark-master:7077 \
-  /opt/spark/src/etl/streaming_job.py
-
-# Simular llegada de datos (hot-folder)
-cp data/bronze/yellow_tripdata_2024-01.parquet \
-   data/streaming_source/batch_$(date +%s).parquet
-```
-
-El job procesa un archivo por micro-batch cada 30 segundos y escribe en `data/gold/streaming/` particionado por hora. El checkpoint se guarda en `data/gold/_checkpoints/streaming/`.
-
+01A2  1A2 
 ---
 
 ## Notebooks
