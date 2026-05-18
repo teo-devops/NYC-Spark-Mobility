@@ -139,9 +139,15 @@ services:
       - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-http://mlflow:5000}
       - SPARK_MASTER=spark://spark-master:7077
       - JUPYTER_TOKEN=${JUPYTER_TOKEN:-spark123}
+      - PYTHONPATH=/usr/local/spark/python:/usr/local/spark/python/lib/py4j-0.10.9.7-src.zip
     volumes:
       - .:/home/jovyan/work
       - ./mlflow_data:/mlflow
+      - ./spark-events:/opt/spark/spark-events
+      - spark-warehouse:/opt/spark/warehouse
+      - ./data:/opt/spark/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    user: root
     networks:
       - spark-net
     depends_on:

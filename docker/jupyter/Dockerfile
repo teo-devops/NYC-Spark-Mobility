@@ -10,7 +10,7 @@ FROM quay.io/jupyter/pyspark-notebook:spark-3.5.0
 USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+    curl docker.io \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Project-specific packages not in the base image
