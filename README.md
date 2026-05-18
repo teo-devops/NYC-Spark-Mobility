@@ -85,6 +85,21 @@ Flags opcionales para ejecutar el pipeline automáticamente:
 ./sh/bootstrap.sh --etl --train --stream  # + streaming job en background
 ```
 
+## Limpiar el Laboratorio (Teardown)
+
+Si necesitas reiniciar el entorno desde cero, limpiar los datos procesados, bases de datos y artefactos de modelos sin perder tus archivos originales descargados:
+
+```bash
+./sh/teardown.sh
+```
+
+El script de *teardown* realiza una limpieza segura:
+- Detiene todos los contenedores y **elimina los volúmenes de Docker** (MariaDB/Hive Metastore).
+- Borra los datos generados por Spark en `data/silver/`, `data/gold/` y `data/streaming_source/`.
+- **Mantiene intactos** tus archivos Parquet y CSV originales en `data/bronze/`.
+- Limpia el tracking de MLflow (`mlflow_data/`) y los logs de Spark (`spark-events/`).
+- Borra directorios temporales de caché de Python (`__pycache__`, `.pytest_cache`).
+
 ---
 
 ## Pipeline paso a paso

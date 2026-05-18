@@ -32,6 +32,7 @@ EXPERIMENT   = "nyc_taxi_etl"
 # ── Datasets a procesar ────────────────────────────────────────────────────────
 DATASETS = [
     ("yellow", "2024-01"),
+    ("green", "2024-01"),
 ]
 
 
