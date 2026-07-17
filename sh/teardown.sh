@@ -11,28 +11,43 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "🛑 Apagando el cluster y eliminando contenedores, redes y volúmenes de Docker..."
-docker compose down -v --remove-orphans
+# Incluimos el perfil "app" para que streamlit-taxi se destruya junto con el resto;
+# si no, sobrevive al down y queda con una referencia a una red ya eliminada,
+# rompiendo el siguiente arranque con "network ... not found".
+docker compose --profile app down -v --remove-orphans
 
-echo "🧹 Limpiando directorios locales generados (requiere sudo para archivos creados por Docker)..."
+echo "🧹 Limpiando directorios locales generados a través de Docker (sin requerir sudo)..."
 
-# Limpiamos capas de datos procesadas (manteniendo data/bronze intacta)
-echo "   - Eliminando capa Silver: data/silver/"
-sudo rm -rf data/silver/*
-echo "   - Eliminando capa Gold: data/gold/"
-sudo rm -rf data/gold/*
-echo "   - Eliminando hot-folder de Streaming: data/streaming_source/"
-sudo rm -rf data/streaming_source/*
+# Usamos una imagen ligera de alpine montando la raíz del proyecto para borrar con permisos de root de forma no interactiva
+docker run --rm -v "$ROOT:/workspace" alpine sh -c '
+  echo "   - Eliminando capa Silver..."
+  rm -rf /workspace/data/silver
+  
+  echo "   - Eliminando capa Gold..."
+  rm -rf /workspace/data/gold
+  
+  echo "   - Eliminando hot-folder de Streaming..."
+  rm -rf /workspace/data/streaming_source
+  
+  echo "   - Eliminando artefactos de MLflow..."
+  rm -rf /workspace/mlflow_data
+  
+  echo "   - Eliminando eventos de Spark History Server..."
+  rm -rf /workspace/spark-events
+  
+  echo "   - Eliminando caché local y archivos temporales..."
+  rm -rf /workspace/.pytest_cache
+  rm -rf /workspace/.idea
+  rm -rf /workspace/app/.streamlit
+  find /workspace -type d -name "__pycache__" -exec rm -rf {} +
+'
 
-# Limpiamos metadatos, artefactos y eventos
-echo "   - Eliminando artefactos de MLflow: mlflow_data/"
-sudo rm -rf mlflow_data/*
-echo "   - Eliminando eventos de Spark History Server: spark-events/"
-sudo rm -rf spark-events/*
-echo "   - Eliminando cache local: .pytest_cache, __pycache__"
-find . -type d -name "__pycache__" -exec sudo rm -rf {} +
-sudo rm -rf .pytest_cache
-sudo rm -rf .idea
-sudo rm -rf app/.streamlit
+echo "📂 Recreando directorios locales con permisos del usuario actual..."
+# Recreamos la estructura de carpetas localmente. Al hacerlo fuera de Docker,
+# las carpetas pertenecerán al usuario del host actual (evitando problemas de permisos/sudo)
+for dir in data/silver data/gold data/streaming_source spark-events mlflow_data/artifacts secrets; do
+  mkdir -p "$dir"
+done
 
-echo "✨ Teardown completo. El entorno está 100% limpio."
+echo "✨ Teardown completo. El entorno está 100% limpio y listo."
 echo "   (Tus archivos fuente originales en data/bronze se han mantenido a salvo)."

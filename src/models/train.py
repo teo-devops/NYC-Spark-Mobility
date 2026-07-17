@@ -113,6 +113,24 @@ def train_model(spark, df, label_col: str, model_name: str):
         )
 
         print(f"   ✅ Modelo '{model_name}' registrado en MLflow")
+
+        # Promover automáticamente a la etapa "Production"
+        try:
+            client = mlflow.tracking.MlflowClient(MLFLOW_URI)
+            latest_versions = client.get_latest_versions(model_name, stages=["None"])
+            if latest_versions:
+                latest_version = latest_versions[0].version
+                print(f"   🚀 Promocionando versión {latest_version} de '{model_name}' a etapa 'Production'...")
+                client.transition_model_version_stage(
+                    name=model_name,
+                    version=latest_version,
+                    stage="Production",
+                    archive_existing_versions=True,
+                )
+                print(f"   ✅ Modelo '{model_name}' promocionado con éxito a 'Production'")
+        except Exception as e:
+            print(f"   ⚠️  No se pudo promocionar el modelo '{model_name}' a Production: {e}")
+
         return model, metrics
 
 

@@ -87,18 +87,46 @@ Flags opcionales para ejecutar el pipeline automáticamente:
 
 ## Limpiar el Laboratorio (Teardown)
 
-Si necesitas reiniciar el entorno desde cero, limpiar los datos procesados, bases de datos y artefactos de modelos sin perder tus archivos originales descargados:
+Si necesitas detener el entorno y limpiar los datos procesados, bases de datos y artefactos de modelos sin perder tus archivos originales descargados en Bronze:
 
 ```bash
 ./sh/teardown.sh
 ```
 
-El script de *teardown* realiza una limpieza segura:
-- Detiene todos los contenedores y **elimina los volúmenes de Docker** (MariaDB/Hive Metastore).
-- Borra los datos generados por Spark en `data/silver/`, `data/gold/` y `data/streaming_source/`.
-- **Mantiene intactos** tus archivos Parquet y CSV originales en `data/bronze/`.
-- Limpia el tracking de MLflow (`mlflow_data/`) y los logs de Spark (`spark-events/`).
-- Borra directorios temporales de caché de Python (`__pycache__`, `.pytest_cache`).
+El script de *teardown* realiza una **limpieza inteligente y segura**:
+- Detiene todos los contenedores y **elimina por completo los volúmenes de Docker** (reseteando MariaDB/Hive Metastore a su estado inicial).
+- **Cero Sudo:** Utiliza de forma interna un contenedor temporal de Docker (`alpine`) para realizar la limpieza de los directorios locales montados. Como los archivos generados por Spark/MLflow se crean desde dentro del contenedor como `root`, esto te ahorra tener que escribir tu contraseña de `sudo` en el host, haciendo el proceso 100% no interactivo.
+- **Mantiene intactos** tus archivos Parquet y CSV originales descargados en `data/bronze/`.
+- Recrea las carpetas vacías del Data Lake en el host con los permisos correctos de tu usuario actual, evitando futuros bloqueos de permisos.
+- Borra directorios de caché de Python (`__pycache__`, `.pytest_cache`) y otros temporales.
+
+---
+
+## Reinicio Rápido para Demos (One-Click Reset)
+
+Para presentaciones en vivo o pruebas de desarrollo rápidas, puedes restablecer por completo el laboratorio de 0 a 100 con un solo comando usando el script de reset:
+
+```bash
+# Reiniciar y dejar el entorno limpio y levantado
+./sh/reset.sh
+
+# Reiniciar, limpiar todo de 0 y arrancar automáticamente el ETL completo
+./sh/reset.sh --etl
+
+# Reiniciar, limpiar de 0, correr ETL y re-entrenar modelos de Spark ML de forma automatizada
+./sh/reset.sh --etl --train
+
+# Reiniciar todo de 0, correr ETL, entrenar modelos y arrancar el streaming en background
+./sh/reset.sh --etl --train --stream
+```
+
+El script de *reset*:
+1. Detiene los servicios y destruye bases de datos y archivos procesados (ejecuta `teardown.sh` sin requerir `sudo`).
+2. Levanta de nuevo la infraestructura Docker Compose completa.
+3. Espera de manera síncrona a que Spark y MLflow reporten que están saludables.
+4. Ejecuta automáticamente los pipelines seleccionados por tus flags (`--etl`, `--train`, `--stream`).
+
+Esto permite que hagas demostraciones en vivo impecables, pudiendo volver a empezar desde cero en cuestión de segundos y con total fiabilidad.
 
 ---
 

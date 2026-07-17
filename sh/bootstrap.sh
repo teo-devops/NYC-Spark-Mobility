@@ -95,6 +95,14 @@ if [ "$RUN_STREAM" = true ]; then
   echo "   Simula datos: cp data/bronze/yellow_tripdata_2025-03.parquet data/streaming_source/batch_\$(date +%s).parquet"
 fi
 
+# ── 7. App Streamlit ────────────────────────────────────────────────────────────
+echo ""
+echo "🖥️  Arrancando app Streamlit..."
+# --force-recreate evita heredar un contenedor de una sesión anterior que quedó
+# apuntando a una red de Docker ya destruida (ver sh/teardown.sh).
+docker compose --profile app up -d --build --force-recreate streamlit
+echo "✅ Streamlit arrancado"
+
 # ── URLs ───────────────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════"
